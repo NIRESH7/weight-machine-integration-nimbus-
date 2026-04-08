@@ -15,9 +15,11 @@ class NimbusApp extends StatelessWidget {
     return MaterialApp(
       title: 'Nimbus Weighing',
       theme: ThemeData(
-        brightness: Brightness.dark,
+        brightness: Brightness.light,
         primaryColor: Colors.blueAccent,
+        scaffoldBackgroundColor: Colors.grey[50], 
         useMaterial3: true,
+        appBarTheme: const AppBarTheme(backgroundColor: Colors.white, foregroundColor: Colors.black, elevation: 1),
       ),
       home: const MainWorkflowScreen(),
     );
@@ -60,6 +62,11 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
             currentWeight = data['weight'];
             connectedPort = data['port'];
             scaleDiagnosticMsg = data['status_log'] ?? "No signal...";
+            
+            // AUTO-UPDATE CURRENT ITEM WEIGHT
+            if (products.isNotEmpty && currentWeight > 0.05) {
+              products[currentIndex]['Weight(gm)'] = currentWeight.toStringAsFixed(2);
+            }
           });
         }
       } catch (_) {}
@@ -154,10 +161,14 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
     }
   }
 
-  Future<void> captureWeight() async {
+  Future<void> captureWeight({String? manualWeight}) async {
     final orderId = products[currentIndex]['Order ID*'];
-    final res = await http.post(Uri.parse("$baseUrl/capture/$orderId"));
+    String url = "$baseUrl/capture/$orderId";
+    if (manualWeight != null) url += "?manual_weight=$manualWeight";
+    
+    final res = await http.post(Uri.parse(url));
     if (res.statusCode == 200) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Captured ${manualWeight ?? 'Live Weight'} Successfully!")));
       final data = json.decode(res.body);
       setState(() => products[currentIndex]['Weight(gm)'] = data['weight'].toString());
     }
@@ -205,14 +216,20 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
   }
 
   Widget _buildSearchBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
+      ),
       child: TextField(
         decoration: InputDecoration(
           hintText: "Search Order ID...",
-          prefixIcon: const Icon(Icons.search),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          contentPadding: const EdgeInsets.all(5),
+          hintStyle: TextStyle(color: Colors.grey[400]),
+          prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 15),
         ),
         onChanged: (v) => setState(() => searchQueries = v),
       ),
@@ -220,38 +237,80 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
   }
 
   Widget _buildExcelTable(List<dynamic> list) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.vertical,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
-          showCheckboxColumn: false,
-          headingRowColor: WidgetStateProperty.all(Colors.blue.withOpacity(0.1)),
-          columns: const [
-            DataColumn(label: Text("ID")),
-            DataColumn(label: Text("Pcs")),
-            DataColumn(label: Text("L")),
-            DataColumn(label: Text("B")),
-            DataColumn(label: Text("H")),
-            DataColumn(label: Text("Weight (gm)")),
-          ],
-          rows: list.asMap().entries.map((entry) {
-            final i = entry.key;
-            final p = entry.value;
-            final isSelected = currentIndex == i;
-            return DataRow(
-              selected: isSelected,
-              onSelectChanged: (_) => setState(() => currentIndex = i),
-              cells: [
-                DataCell(Text(p['Order ID*'].toString())),
-                DataCell(Text(p['Total Products Count'].toString())),
-                DataCell(Text(p['Length(cm)'].toString())),
-                DataCell(Text(p['Breadth(cm)'].toString())),
-                DataCell(Text(p['Height(cm)'].toString())),
-                DataCell(Text(p['Weight(gm)'] ?? "0", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueAccent))),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.vertical,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              showCheckboxColumn: false,
+              headingRowColor: WidgetStateProperty.all(Colors.blue.withOpacity(0.05)),
+              dataRowColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) return Colors.blue.withOpacity(0.2);
+                return null;
+              }),
+              border: TableBorder.all(color: Colors.grey[200]!, width: 1),
+              columns: const [
+                DataColumn(label: Text("ID", style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text("Pcs", style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text("H", style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text("B", style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text("L", style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text("Weight (gm)", style: TextStyle(fontWeight: FontWeight.bold))),
               ],
-            );
-          }).toList(),
+              rows: list.asMap().entries.map((entry) {
+                final i = entry.key;
+                final p = entry.value;
+                final isSelected = currentIndex == i;
+                return DataRow(
+                  selected: isSelected,
+                  color: WidgetStateProperty.all(i % 2 == 0 ? Colors.white : Colors.grey[50]),
+                  onSelectChanged: (_) => setState(() => currentIndex = i),
+                  cells: [
+                    DataCell(Text(p['Order ID*'].toString())),
+                    DataCell(Text(p['Total Products Count'].toString())),
+                    DataCell(Text(p['Height(cm)'].toString())),
+                    DataCell(Text(p['Breadth(cm)'].toString())),
+                    DataCell(Text(p['Length(cm)'].toString())),
+                    DataCell(
+                      GestureDetector(
+                        onTap: () {
+                          final ctrl = TextEditingController(text: p['Weight(gm)'] ?? "0");
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text("Edit Weight (gm)"),
+                              content: TextField(controller: ctrl, keyboardType: TextInputType.number),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(context), child: const Text("CANCEL")),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    setState(() => p['Weight(gm)'] = ctrl.text);
+                                    captureWeight(manualWeight: ctrl.text);
+                                    Navigator.pop(context);
+                                  }, 
+                                  child: const Text("SAVE"),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                        child: Text(p['Weight(gm)'] ?? "0", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+                      ),
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
         ),
       ),
     );
@@ -261,42 +320,65 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
     if (products.isEmpty) return const SizedBox();
     final item = products[currentIndex];
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 10)],
+        color: Colors.white,
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))],
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
-              Text("ITEM: ${item['Order ID*']}", style: const TextStyle(fontWeight: FontWeight.bold)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("ORDER ID: ${item['Order ID*']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text("L:${item['Length(cm)']} B:${item['Breadth(cm)']} H:${item['Height(cm)']}", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                ],
+              ),
               const Spacer(),
-              Text("DIM: ${item['Length(cm)']} x ${item['Breadth(cm)']} x ${item['Height(cm)']}"),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+                child: Text("${currentIndex + 1} / ${products.length}", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+              ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 15),
           Row(
             children: [
               Expanded(
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent, 
-                    padding: const EdgeInsets.all(15)
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   icon: const Icon(Icons.scale),
-                  label: const Text("CAPTURE WEIGHT"),
+                  label: const Text("CAPTURE WEIGHT", style: TextStyle(fontWeight: FontWeight.bold)),
                   onPressed: captureWeight,
                 ),
               ),
-              const SizedBox(width: 10),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800], padding: const EdgeInsets.all(15)),
-                onPressed: () => setState(() {
-                  if (currentIndex < products.length - 1) currentIndex++;
-                }),
-                child: const Text("NEXT"),
+              const SizedBox(width: 12),
+              Material(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  onTap: () async {
+                    // AUTO-SAVE BEFORE NEXT
+                    await captureWeight(manualWeight: products[currentIndex]['Weight(gm)']);
+                    setState(() { if (currentIndex < products.length - 1) currentIndex++; });
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                    child: const Icon(Icons.arrow_forward_ios, size: 18),
+                  ),
+                ),
               ),
             ],
           ),
@@ -307,56 +389,43 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
 
   Widget _buildSetupScreen() {
     return Scaffold(
-      appBar: AppBar(title: const Text("Nimbus Scale Setup")),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildSetupButton(
-                "1. CONNECT SCALE", 
-                Icons.bluetooth_searching, 
-                connectedPort != null ? Colors.green : Colors.blue,
-                scanAndConnect,
-                subtitle: connectedPort != null ? "Connected to $connectedPort" : "Scan available ports",
-              ),
-              const SizedBox(height: 30),
-              _buildSetupButton(
-                "2. UPLOAD CSV FILE", 
-                Icons.file_upload, 
-                Colors.orange,
-                pickAndUploadFile,
-                subtitle: "Select report file from your phone",
-              ),
-            ],
-          ),
-        ),
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text("Om Vinayaka Garments", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blueAccent)),
+        centerTitle: true,
+        elevation: 0,
+        backgroundColor: Colors.white,
       ),
-    );
-  }
-
-  Widget _buildSetupButton(String title, IconData icon, Color color, VoidCallback onPressed, {String? subtitle}) {
-    return InkWell(
-      onTap: onPressed,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          border: Border.all(color: color, width: 2),
-          borderRadius: BorderRadius.circular(15),
-        ),
-        child: Row(
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 40.0),
+        child: Column(
           children: [
-            Icon(icon, size: 40, color: color),
-            const SizedBox(width: 20),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
-                if (subtitle != null) Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              ],
+            const Text(
+              "Om Vinayaka Garments",
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "Follow the steps below to start weighing",
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            const SizedBox(height: 50),
+            _buildSetupButton(
+              "CONNECT SCALE", 
+              Icons.bluetooth_searching, 
+              connectedPort != null ? Colors.green : Colors.blueAccent,
+              scanAndConnect,
+              step: "STEP 1",
+              subtitle: connectedPort != null ? "Connected to $connectedPort" : "Scan and pair with HC-05",
+            ),
+            const SizedBox(height: 20),
+            _buildSetupButton(
+              "UPLOAD CSV FILE", 
+              Icons.file_copy_rounded, 
+              Colors.orange,
+              pickAndUploadFile,
+              step: "STEP 2",
+              subtitle: "Import your NimbusPost order CSV",
             ),
           ],
         ),
@@ -364,24 +433,80 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
     );
   }
 
+  Widget _buildSetupButton(String title, IconData icon, Color color, VoidCallback onPressed, {required String step, required String subtitle}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: color.withOpacity(0.1), blurRadius: 20, spreadRadius: 5)],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: Icon(icon, color: color, size: 30),
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(step, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color, letterSpacing: 1)),
+                      Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                    ],
+                  ),
+                ),
+                Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildStatusHeader() {
     return Container(
-      color: scaleStatus == "Connected" ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
+      ),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.bluetooth, color: scaleStatus == "Connected" ? Colors.green : Colors.red),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: scaleStatus == "Connected" ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.bluetooth, color: scaleStatus == "Connected" ? Colors.green : Colors.red, size: 20),
+              ),
               const SizedBox(width: 10),
-              Text(scaleStatus, style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(scaleStatus, style: TextStyle(fontWeight: FontWeight.bold, color: scaleStatus == "Connected" ? Colors.green : Colors.red)),
               const Spacer(),
-              Text("${currentWeight.toStringAsFixed(2)} KG", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue)),
+              Text("${currentWeight.toStringAsFixed(2)} gm", style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
             ],
           ),
-          const Divider(height: 10),
-          Text(scaleDiagnosticMsg, style: const TextStyle(fontSize: 12, color: Colors.yellow, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text(scaleDiagnosticMsg, style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic)),
         ],
       ),
     );
