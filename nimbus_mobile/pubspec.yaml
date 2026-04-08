@@ -41,6 +41,8 @@ dependencies:
   file_picker: ^11.0.2
   dio: ^5.9.2
   file_selector: ^1.1.0
+  flutter_bluetooth_serial: ^0.4.0
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:

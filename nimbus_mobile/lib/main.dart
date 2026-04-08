@@ -5,6 +5,9 @@ import 'package:file_selector/file_selector.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() => runApp(const NimbusApp());
 
@@ -33,84 +36,150 @@ class MainWorkflowScreen extends StatefulWidget {
 }
 
 class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
-  final String baseUrl = "http://192.168.1.45:8000"; // Computer IP
+  final String baseUrl = "http://35.175.113.81:8000"; // AWS Cloud IP
   List<dynamic> products = [];
   bool isLoading = false;
   int currentIndex = 0;
+  
+  // Local Bluetooth State
+  BluetoothConnection? connection;
+  BluetoothDevice? server;
   String scaleStatus = "Disconnected";
   double currentWeight = 0.0;
   String? connectedPort;
   bool isFileUploaded = false;
   String scaleDiagnosticMsg = "Waiting for connection...";
+  String _messageBuffer = ""; 
 
   @override
-  void initState() {
-    super.initState();
-    startStatusTimer();
+  void dispose() {
+    connection?.dispose();
+    super.dispose();
   }
 
   void startStatusTimer() {
-    Future.doWhile(() async {
-      await Future.delayed(const Duration(seconds: 2));
-      if (!mounted) return false;
-      try {
-        final res = await http.get(Uri.parse("$baseUrl/scale_status"));
-        if (res.statusCode == 200) {
-          final data = json.decode(res.body);
-          setState(() {
-            scaleStatus = data['connected'] ? "Connected" : "Disconnected";
-            currentWeight = data['weight'];
-            connectedPort = data['port'];
-            scaleDiagnosticMsg = data['status_log'] ?? "No signal...";
-            
-            // AUTO-UPDATE CURRENT ITEM WEIGHT
-            if (products.isNotEmpty && currentWeight > 0.05) {
-              products[currentIndex]['Weight(gm)'] = currentWeight.toStringAsFixed(2);
-            }
-          });
-        }
-      } catch (_) {}
-      return true;
-    });
+    // We no longer pull scale status from the backend. 
+    // The Bluetooth connection stream handles this now.
   }
 
   Future<void> scanAndConnect() async {
+    // 1. Check Permissions
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.location,
+    ].request();
+
+    if (statuses[Permission.bluetoothScan] != PermissionStatus.granted ||
+        statuses[Permission.bluetoothConnect] != PermissionStatus.granted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Bluetooth Permissions Denied"))
+      );
+      return;
+    }
+
     try {
-      final res = await http.get(Uri.parse("$baseUrl/scan"));
-      final List<dynamic> ports = json.decode(res.body);
+      // 2. Get Paired Devices
+      List<BluetoothDevice> bondedDevices = await FlutterBluetoothSerial.instance.getBondedDevices();
       
       if (!mounted) return;
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text("Select Bluetooth/Serial Port"),
+          title: const Text("Select Bluetooth Scale"),
           content: SizedBox(
             width: double.maxFinite,
             child: ListView.builder(
               shrinkWrap: true,
-              itemCount: ports.length,
+              itemCount: bondedDevices.length,
               itemBuilder: (context, i) => ListTile(
-                title: Text(ports[i]['port']),
-                subtitle: Text(ports[i]['desc']),
-                onTap: () async {
-                  await http.post(Uri.parse("$baseUrl/connect/${ports[i]['port']}"));
-                  if (mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text("Connected to ${ports[i]['port']} Successfully!"),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  }
+                leading: const Icon(Icons.bluetooth),
+                title: Text(bondedDevices[i].name ?? "Unknown Device"),
+                subtitle: Text(bondedDevices[i].address),
+                onTap: () {
+                  Navigator.pop(context);
+                  _connectToDevice(bondedDevices[i]);
                 },
               ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context), 
+              child: const Text("CANCEL")
+            ),
+          ],
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Scan Failed")));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+    }
+  }
+
+  void _connectToDevice(BluetoothDevice device) async {
+    setState(() {
+      scaleStatus = "Connecting...";
+      scaleDiagnosticMsg = "Linking to ${device.name}...";
+    });
+
+    try {
+      connection = await BluetoothConnection.toAddress(device.address);
+      setState(() {
+        server = device;
+        scaleStatus = "Connected";
+        scaleDiagnosticMsg = "Directly connected to ${device.name}";
+        connectedPort = device.name;
+      });
+
+      connection!.input!.listen(_onDataReceived).onDone(() {
+        setState(() {
+          scaleStatus = "Disconnected";
+          scaleDiagnosticMsg = "Connection lost.";
+          connection = null;
+        });
+      });
+    } catch (e) {
+      setState(() {
+        scaleStatus = "Failed";
+        scaleDiagnosticMsg = "Could not connect.";
+      });
+    }
+  }
+
+  void _onDataReceived(Uint8List data) {
+    // Convert bytes to string and buffer it
+    String dataString = String.fromCharCodes(data);
+    _messageBuffer += dataString;
+
+    // Check for newline (assuming scale sends \n or \r)
+    if (_messageBuffer.contains('\n') || _messageBuffer.contains('\r')) {
+      final lines = _messageBuffer.split(RegExp(r'[\n\r]'));
+      // Last element might be incomplete, keep it in buffer
+      _messageBuffer = lines.last;
+      
+      // Process the second-to-last complete line
+      for (int i = 0; i < lines.length - 1; i++) {
+        String line = lines[i].trim();
+        if (line.isNotEmpty) {
+          _parseWeightLine(line);
+        }
+      }
+    }
+  }
+
+  void _parseWeightLine(String line) {
+    // Try to extract a number from the line (e.g., "1.23 kg" -> 1.23)
+    final regExp = RegExp(r"[-+]?\d*\.?\d+");
+    final match = regExp.firstMatch(line);
+    if (match != null) {
+      setState(() {
+        currentWeight = double.tryParse(match.group(0)!) ?? 0.0;
+        
+        // AUTO-UPDATE CURRENT ITEM WEIGHT
+        if (products.isNotEmpty && currentWeight > 0.05) {
+          products[currentIndex]['Weight(gm)'] = currentWeight.toStringAsFixed(2);
+        }
+      });
     }
   }
 
