@@ -3,6 +3,12 @@ allprojects {
         google()
         mavenCentral()
     }
+    configurations.all {
+        resolutionStrategy {
+            force("androidx.core:core:1.13.1")
+            force("androidx.core:core-ktx:1.13.1")
+        }
+    }
 }
 
 val newBuildDir: Directory =
@@ -20,13 +26,30 @@ subprojects {
 }
 
 subprojects {
-    afterEvaluate {
+    val fixProject = {
         if (project.hasProperty("android")) {
-            val android = project.extensions.getByName("android") as com.android.build.gradle.BaseExtension
-            if (android.namespace == null) {
-                android.namespace = "com.nimbus.bluetooth_fix.${project.name}"
+            val extension = project.extensions.findByName("android")
+            if (extension is com.android.build.gradle.BaseExtension) {
+                if (extension.namespace == null) {
+                    extension.namespace = "com.nimbus.bluetooth_fix.${project.name}"
+                }
+                
+                // FIX FOR "package=" in AndroidManifest.xml
+                val manifestFile = file("src/main/AndroidManifest.xml")
+                if (manifestFile.exists()) {
+                    val content = manifestFile.readText()
+                    if (content.contains("package=")) {
+                        val newContent = content.replace(Regex("""package="[^"]*""""), "")
+                        manifestFile.writeText(newContent)
+                    }
+                }
             }
         }
+    }
+    if (project.state.executed) {
+        fixProject()
+    } else {
+        project.afterEvaluate { fixProject() }
     }
 }
 

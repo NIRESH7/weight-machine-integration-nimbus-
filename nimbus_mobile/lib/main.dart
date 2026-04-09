@@ -36,7 +36,7 @@ class MainWorkflowScreen extends StatefulWidget {
 }
 
 class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
-  final String baseUrl = "http://35.175.113.81:8000"; // AWS Cloud IP
+  final String baseUrl = "http://10.0.2.2:8000"; // Local Development (Emulator)
   List<dynamic> products = [];
   bool isLoading = false;
   int currentIndex = 0;
@@ -50,6 +50,11 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
   bool isFileUploaded = false;
   String scaleDiagnosticMsg = "Waiting for connection...";
   String _messageBuffer = ""; 
+
+  // New Filter State
+  String searchQueries = "";
+  String selectedPaymentType = 'All';
+  String selectedWhatsappStatus = 'All';
 
   @override
   void dispose() {
@@ -243,16 +248,28 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
     }
   }
 
-  String searchQueries = "";
-
   @override
   Widget build(BuildContext context) {
     if (!isFileUploaded) return _buildSetupScreen();
     if (isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (products.isEmpty) return _buildSetupScreen();
 
-    final filteredProducts = products.where((p) => 
-      p['Order ID*'].toString().contains(searchQueries)).toList();
+    final filteredProducts = products.where((p) {
+      final matchesSearch = p['Order ID*'].toString().contains(searchQueries);
+      
+      final paymentType = p['Payment Type*']?.toString().toLowerCase() ?? "";
+      final matchesType = selectedPaymentType == 'All' || 
+                         paymentType == selectedPaymentType.toLowerCase();
+
+      final whatsappStatus = p['Whatsapp Status']?.toString().toLowerCase().trim() ?? "";
+      // Handle the user's "null" or empty cell request
+      final matchesWhatsapp = selectedWhatsappStatus == 'All' || 
+                             (selectedWhatsappStatus == 'Confirm' && whatsappStatus == 'confirm') ||
+                             (selectedWhatsappStatus == 'Cancelled' && whatsappStatus == 'cancelled') ||
+                             (selectedWhatsappStatus == 'Null' && whatsappStatus == '');
+
+      return matchesSearch && matchesType && matchesWhatsapp;
+    }).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -286,21 +303,76 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
 
   Widget _buildSearchBar() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      child: Column(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
+            ),
+            child: TextField(
+              decoration: InputDecoration(
+                hintText: "Search Order ID...",
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 15),
+              ),
+              onChanged: (v) => setState(() => searchQueries = v),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _buildFilterDropdown(
+                  "Type", 
+                  ['All', 'COD', 'Prepaid'], 
+                  selectedPaymentType, 
+                  (v) => setState(() => selectedPaymentType = v!),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildFilterDropdown(
+                  "WA Status", 
+                  ['All', 'Confirm', 'Cancelled', 'Null'], 
+                  selectedWhatsappStatus, 
+                  (v) => setState(() => selectedWhatsappStatus = v!),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterDropdown(String label, List<String> options, String currentVal, ValueChanged<String?> onChanged) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[200]!),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4)],
       ),
-      child: TextField(
-        decoration: InputDecoration(
-          hintText: "Search Order ID...",
-          hintStyle: TextStyle(color: Colors.grey[400]),
-          prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 15),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: currentVal,
+          isExpanded: true,
+          style: const TextStyle(color: Colors.black, fontSize: 13),
+          icon: const Icon(Icons.filter_list, size: 16, color: Colors.blueAccent),
+          items: options.map((String value) {
+            return DropdownMenuItem<String>(
+              value: value,
+              child: Text(value),
+            );
+          }).toList(),
+          onChanged: onChanged,
         ),
-        onChanged: (v) => setState(() => searchQueries = v),
       ),
     );
   }
