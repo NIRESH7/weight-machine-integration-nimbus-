@@ -248,13 +248,8 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (!isFileUploaded) return _buildSetupScreen();
-    if (isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (products.isEmpty) return _buildSetupScreen();
-
-    final filteredProducts = products.where((p) {
+  List<dynamic> _getFilteredProducts() {
+    return products.where((p) {
       final matchesSearch = p['Order ID*'].toString().contains(searchQueries);
       
       final paymentType = p['Payment Type*']?.toString().toLowerCase() ?? "";
@@ -262,7 +257,6 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
                          paymentType == selectedPaymentType.toLowerCase();
 
       final whatsappStatus = p['Whatsapp Status']?.toString().toLowerCase().trim() ?? "";
-      // Handle the user's "null" or empty cell request
       final matchesWhatsapp = selectedWhatsappStatus == 'All' || 
                              (selectedWhatsappStatus == 'Confirm' && whatsappStatus == 'confirm') ||
                              (selectedWhatsappStatus == 'Cancelled' && whatsappStatus == 'cancelled') ||
@@ -270,6 +264,15 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
 
       return matchesSearch && matchesType && matchesWhatsapp;
     }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isFileUploaded) return _buildSetupScreen();
+    if (isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (products.isEmpty) return _buildSetupScreen();
+
+    final filteredProducts = _getFilteredProducts();
 
     return Scaffold(
       appBar: AppBar(
@@ -294,11 +297,28 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
   }
 
   Future<void> exportReport() async {
-    final res = await http.get(Uri.parse("$baseUrl/export"));
+    final filtered = _getFilteredProducts();
+    if (filtered.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No filtered products to export")));
+      return;
+    }
+
+    final headers = filtered.first.keys.toList();
+    String csv = headers.join(",") + "\n";
+    for (var row in filtered) {
+      csv += headers.map((h) {
+        String val = row[h]?.toString() ?? "";
+        if (val.contains(",") || val.contains("\n") || val.contains("\"")) {
+          val = '"' + val.replaceAll('"', '""') + '"';
+        }
+        return val;
+      }).join(",") + "\n";
+    }
+
     final tempDir = await getTemporaryDirectory();
-    final file = File('${tempDir.path}/final_report.csv');
-    await file.writeAsBytes(res.bodyBytes);
-    Share.shareXFiles([XFile(file.path)], text: 'Nimbus Report');
+    final file = File('${tempDir.path}/nimbus_filtered_report.csv');
+    await file.writeAsString(csv);
+    Share.shareXFiles([XFile(file.path)], text: 'Nimbus Filtered Report');
   }
 
   Widget _buildSearchBar() {
