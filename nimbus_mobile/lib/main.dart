@@ -36,7 +36,7 @@ class MainWorkflowScreen extends StatefulWidget {
 }
 
 class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
-  final String baseUrl = "http://10.0.2.2:8000"; // Local Development (Emulator)
+  final String baseUrl = "http://35.175.113.81:8000"; // AWS Cloud IP
   List<dynamic> products = [];
   bool isLoading = false;
   int currentIndex = 0;
