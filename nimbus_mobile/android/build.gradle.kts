@@ -33,30 +33,38 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Fix namespace issues ONLY (safe)
+// Aggressive fix for lStar and SDK versions
 subprojects {
-    if (project.name != "app") {
-        project.plugins.withType(com.android.build.gradle.BasePlugin::class.java) {
-            val extension = project.extensions.getByName("android")
+    val fixProject = {
+        if (project.hasProperty("android")) {
+            val extension = project.extensions.findByName("android")
             if (extension is com.android.build.gradle.BaseExtension) {
-                // FORCE SDK 36 FOR PLUGINS (Fixes lStar error)
-                extension.compileSdkVersion(36)
-                extension.defaultConfig.targetSdkVersion(36)
-
-                if (extension.namespace == null) {
-                    extension.namespace = "com.nimbus.bluetooth_fix.${project.name}"
-                }
-
-                val manifestFile = file("src/main/AndroidManifest.xml")
-                if (manifestFile.exists()) {
-                    val content = manifestFile.readText()
-                    if (content.contains("package=")) {
-                        val newContent = content.replace(Regex("""package="[^"]*""""), "")
-                        manifestFile.writeText(newContent)
+                // Force SDK 36 on all subprojects EXCEPT the main app
+                if (project.name != "app") {
+                    extension.compileSdkVersion(36)
+                    extension.defaultConfig.targetSdkVersion(36)
+                    
+                    if (extension.namespace == null) {
+                        extension.namespace = "com.nimbus.bluetooth_fix.${project.name}"
+                    }
+                    
+                    val manifestFile = file("src/main/AndroidManifest.xml")
+                    if (manifestFile.exists()) {
+                        val content = manifestFile.readText()
+                        if (content.contains("package=")) {
+                            val newContent = content.replace(Regex("""package="[^"]*""""), "")
+                            manifestFile.writeText(newContent)
+                        }
                     }
                 }
             }
         }
+    }
+
+    if (project.state.executed) {
+        fixProject()
+    } else {
+        project.afterEvaluate { fixProject() }
     }
 }
 

@@ -40,6 +40,7 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
   List<dynamic> products = [];
   bool isLoading = false;
   int currentIndex = 0;
+  Map<String, dynamic>? selectedProduct;
   
   // Local Bluetooth State
   BluetoothConnection? connection;
@@ -180,9 +181,9 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
       setState(() {
         currentWeight = double.tryParse(match.group(0)!) ?? 0.0;
         
-        // AUTO-UPDATE CURRENT ITEM WEIGHT
-        if (products.isNotEmpty && currentWeight > 0.05) {
-          products[currentIndex]['Weight(gm)'] = currentWeight.toStringAsFixed(2);
+        // AUTO-UPDATE SELECTED ITEM WEIGHT
+        if (selectedProduct != null && currentWeight > 0.05) {
+          selectedProduct!['Weight(gm)'] = currentWeight.toStringAsFixed(2);
         }
       });
     }
@@ -236,7 +237,10 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
   }
 
   Future<void> captureWeight({String? manualWeight}) async {
-    final orderId = products[currentIndex]['Order ID*'];
+    final item = selectedProduct;
+    if (item == null) return;
+
+    final orderId = item['Order ID*'];
     String url = "$baseUrl/capture/$orderId";
     if (manualWeight != null) url += "?manual_weight=$manualWeight";
     
@@ -244,7 +248,7 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
     if (res.statusCode == 200) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Captured ${manualWeight ?? 'Live Weight'} Successfully!")));
       final data = json.decode(res.body);
-      setState(() => products[currentIndex]['Weight(gm)'] = data['weight'].toString());
+      setState(() => item['Weight(gm)'] = data['weight'].toString());
     }
   }
 
@@ -430,11 +434,15 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
               rows: list.asMap().entries.map((entry) {
                 final i = entry.key;
                 final p = entry.value;
-                final isSelected = currentIndex == i;
+                final isSelected = selectedProduct == p;
                 return DataRow(
                   selected: isSelected,
-                  color: WidgetStateProperty.all(i % 2 == 0 ? Colors.white : Colors.grey[50]),
-                  onSelectChanged: (_) => setState(() => currentIndex = i),
+                  color: WidgetStateProperty.all(entry.key % 2 == 0 ? Colors.white : Colors.grey[50]),
+                  onSelectChanged: (_) => setState(() {
+                    selectedProduct = p;
+                    // Also update currentIndex for traversal relative to filtered list
+                    currentIndex = entry.key;
+                  }),
                   cells: [
                     DataCell(Text(p['Order ID*'].toString())),
                     DataCell(Text(p['Total Products Count'].toString())),
@@ -478,8 +486,8 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
   }
 
   Widget _buildSelectionPanel() {
-    if (products.isEmpty) return const SizedBox();
-    final item = products[currentIndex];
+    if (selectedProduct == null) return const SizedBox();
+    final item = selectedProduct!;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -503,7 +511,7 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
-                child: Text("${currentIndex + 1} / ${products.length}", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+                child: const Text("SELECTED", style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -531,8 +539,12 @@ class _MainWorkflowScreenState extends State<MainWorkflowScreen> {
                 child: InkWell(
                   onTap: () async {
                     // AUTO-SAVE BEFORE NEXT
-                    await captureWeight(manualWeight: products[currentIndex]['Weight(gm)']);
-                    setState(() { if (currentIndex < products.length - 1) currentIndex++; });
+                    if (selectedProduct != null) {
+                      await captureWeight(manualWeight: selectedProduct!['Weight(gm)']);
+                    }
+                    // For "Next", we might need to find the item in the current filtered list
+                    // but for now let's just use the index relative to display
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Select the next row in the table")));
                   },
                   borderRadius: BorderRadius.circular(12),
                   child: Container(
